@@ -25,19 +25,23 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
   if (!desiredSql || !targetDbUrl) return reply.status(400).send({ error: "Missing Input" });
   if (!shadowDbUrl) return reply.status(500).send({ error: "Missing Shadow DB URL" });
 
+  // 1. GENERATE SAFE FILENAME
   const fileName = `schema_${Date.now()}.sql`;
   
   try {
     await fs.writeFile(fileName, desiredSql);
 
-    // Generate Safe File URL (Cross-Platform)
+    // 2. GENERATE SAFE URL (No manual DNS hacking)
+    // We let the OS and Atlas handle networking naturally.
+    // This ensures Neon (SNI) and AWS work perfectly.
     let cwd = process.cwd();
     if (process.platform === 'win32') cwd = cwd.replace(/\\/g, '/');
     const schemaFileUrl = `file://${cwd}/${fileName}`;
     
+    // 3. RUN ATLAS
     const args = [
       'schema', 'diff',
-      '--from', targetDbUrl, 
+      '--from', targetDbUrl,
       '--to', schemaFileUrl,
       '--dev-url', shadowDbUrl,
       '--format', 'sql'
@@ -55,11 +59,34 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
       child.stderr.on('data', (d) => { stderrData += d.toString(); });
 
       child.on('close', async (code) => {
+        // Cleanup
         try { await fs.unlink(fileName); } catch {}
 
         if (code !== 0 && stderrData.length > 0) {
-          console.error("Atlas Error:", stderrData);
-          resolve(reply.status(500).send({ success: false, error: "Migration failed", details: stderrData }));
+          console.error("Atlas Failed:", stderrData);
+
+          // --- SMART ERROR HANDLING (The Production Fix) ---
+          let userMessage = "Migration calculation failed.";
+          
+          // Detect Supabase IPv6 Error
+          if (stderrData.includes("network is unreachable") || stderrData.includes("dial tcp")) {
+            if (targetDbUrl.includes("supabase.co")) {
+              userMessage = "Connection Failed: You are using a Supabase 'Direct' URL which is IPv6-only. Please use the 'Connection Pooler' URL (port 6543) instead.";
+            } else {
+              userMessage = "Network Unreachable: The database URL is not accessible from this server.";
+            }
+          }
+          // Detect Neon SNI Error (Endpoint ID)
+          else if (stderrData.includes("Endpoint ID is not specified")) {
+            userMessage = "Connection Failed: Neon DB requires a hostname for SNI. Do not use an IP address.";
+          }
+
+          resolve(reply.status(400).send({ 
+            success: false, 
+            error: userMessage, // Send the readable message to Frontend
+            details: stderrData 
+          }));
+
         } else {
           resolve({ success: true, plan: stdoutData });
         }

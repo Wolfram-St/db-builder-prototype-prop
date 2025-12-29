@@ -1,14 +1,10 @@
-// src/components/DeployModal.tsx
 import { useState } from "react";
-import { toast } from "sonner";
+// 1. KEEP SONNER (ShadCN Default)
+import { toast } from "sonner"; 
 import { Loader2, Terminal, Play, X, CheckCircle2 } from "lucide-react";
 import { useDBStore } from "../store/dbStore";
-// I assume you saved the generator here. If not, adjust path.
 import { generateSQL } from "../lib/sqlGenerator"; 
 
-// AUTOMATIC SWITCHING:
-// If you run "npm run dev", it uses localhost.
-// If you deploy to Render, it uses the VITE_API_URL env var.
 const BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 export function DeployModal({ onClose }: { onClose: () => void }) {
@@ -23,12 +19,12 @@ export function DeployModal({ onClose }: { onClose: () => void }) {
       return;
     }
     
-    setLoading(true);
-    try {
-      // 1. Generate "Desired State" (The SQL from your canvas)
+    // 2. Define the async operation
+    const fetchPlan = async () => {
+      // Generate SQL
       const desiredSql = generateSQL(tables, relations);
 
-      // 2. Call your Node.js Backend
+      // Call Backend
       const response = await fetch(`${BACKEND_URL}/deploy/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -40,25 +36,36 @@ export function DeployModal({ onClose }: { onClose: () => void }) {
 
       const data = await response.json();
 
+      // If backend fails, THROW the error message so Sonner catches it
       if (!data.success) {
         throw new Error(data.error || "Failed to calculate plan");
       }
 
-      // 3. Show the Plan
-      if (!data.plan) {
-        setPlan("-- Your database is already up to date!");
-        toast.success("No changes needed.");
-      } else {
-        setPlan(data.plan);
-        toast.success("Migration Plan Calculated!");
-      }
+      return data;
+    };
 
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.message || "Connection failed");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+
+    // 3. USE SONNER'S PROMISE
+    // This looks almost identical to the other library, but native to ShadCN
+    toast.promise(fetchPlan(), {
+      loading: 'Connecting to Database...',
+      success: (data) => {
+        setLoading(false);
+        if (!data.plan) {
+          setPlan("-- Your database is already up to date!");
+          return "No changes needed.";
+        } else {
+          setPlan(data.plan);
+          return "Migration Plan Calculated!";
+        }
+      },
+      error: (err) => {
+        setLoading(false);
+        // This takes the "Smart Error" from your backend and shows it in the toast
+        return err.message; 
+      },
+    });
   };
 
   return (
@@ -86,10 +93,10 @@ export function DeployModal({ onClose }: { onClose: () => void }) {
             </label>
             <div className="relative">
               <input
-                type="text" // Hides the connection string slightly
+                type="text"
                 value={targetDbUrl}
                 onChange={(e) => setTargetDbUrl(e.target.value)}
-                placeholder="postgres://user:pass@host:5432/db"
+                placeholder="postgres://user:pass@host:6543/db"
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-sm text-zinc-200 font-mono focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20 outline-none transition-all placeholder:text-zinc-700"
               />
             </div>
