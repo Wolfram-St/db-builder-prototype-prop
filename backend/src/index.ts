@@ -3,7 +3,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
-import path from 'path';
+import dns from 'dns/promises'; // <--- NEW IMPORT
+import { URL } from 'url';      // <--- NEW IMPORT
 
 const server = Fastify({ logger: true });
 
@@ -18,6 +19,39 @@ server.get('/health', async () => {
   return { status: 'ok', timestamp: new Date() };
 });
 
+// --- HELPER: Force IPv4 Resolution ---
+// This solves the "network unreachable" IPv6 error by manually resolving the domain
+async function forceIPv4(connectionString: string): Promise<string> {
+  try {
+    const parsed = new URL(connectionString);
+    const hostname = parsed.hostname;
+
+    // If it's already an IP (like 127.0.0.1), skip resolution
+    const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    if (isIp) return connectionString;
+
+    console.log(`Resolving IP for: ${hostname}`);
+    
+    // Resolve to the first IPv4 address found
+    const addresses = await dns.resolve4(hostname);
+    if (!addresses || addresses.length === 0) {
+      throw new Error(`Could not resolve IPv4 for ${hostname}`);
+    }
+
+    const ipv4 = addresses[0];
+    console.log(`Resolved ${hostname} -> ${ipv4}`);
+
+    // Update the hostname in the URL object
+    parsed.hostname = ipv4;
+    return parsed.toString();
+
+  } catch (error) {
+    console.error("DNS Resolution Failed:", error);
+    // Fallback: Return original string if resolution fails
+    return connectionString;
+  }
+}
+
 server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
   const { desiredSql, targetDbUrl } = request.body;
   const shadowDbUrl = process.env.SHADOW_DB_URL;
@@ -25,45 +59,32 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
   if (!desiredSql || !targetDbUrl) return reply.status(400).send({ error: "Missing Input" });
   if (!shadowDbUrl) return reply.status(500).send({ error: "Missing Shadow DB URL" });
 
-  // 1. GENERATE FILE NAME
   const fileName = `schema_${Date.now()}.sql`;
   
   try {
-    // Write file to current folder (Works on Windows & Render)
     await fs.writeFile(fileName, desiredSql);
 
-    // 2. BUILD THE SAFE URL (The Magic Part)
-    // We get the current full folder path
+    // 1. RESOLVE DATABASE URLs TO IPv4
+    // We do this for both Target and Shadow DBs to be safe
+    const safeTargetUrl = await forceIPv4(targetDbUrl);
+    const safeShadowUrl = await forceIPv4(shadowDbUrl);
+
+    // 2. PREPARE FILE URL
     let cwd = process.cwd();
+    if (process.platform === 'win32') cwd = cwd.replace(/\\/g, '/');
+    const schemaFileUrl = `file://${cwd}/${fileName}`;
     
-    // IF WINDOWS: Replace backslashes (\) with forward slashes (/) 
-    // G:\Code\Project -> G:/Code/Project
-    if (process.platform === 'win32') {
-      cwd = cwd.replace(/\\/g, '/');
-    }
-
-    // Construct the URL. 
-    // On Windows: file://G:/Code/Project/schema.sql
-    // On Render:  file:///app/backend/schema.sql
-    const safeUrl = `file://${cwd}/${fileName}`;
-    
-    console.log("Environment:", process.platform);
-    console.log("Target URL:", safeUrl);
-
-    // 3. DEFINE COMMAND
+    // 3. RUN ATLAS
     const args = [
       'schema', 'diff',
-      '--from', targetDbUrl,
-      '--to', safeUrl,
-      '--dev-url', shadowDbUrl,
+      '--from', safeTargetUrl,  // Using the IPv4 URL
+      '--to', schemaFileUrl,
+      '--dev-url', safeShadowUrl, // Using the IPv4 URL
       '--format', 'sql'
     ];
 
-    // On Render/Linux, the command is just 'atlas'
-    // On Windows, we look for 'atlas.exe' or 'atlas'
     const cmd = process.platform === 'win32' ? 'atlas.exe' : 'atlas';
 
-    // 4. SPAWN PROCESS
     return new Promise((resolve) => {
       const child = spawn(cmd, args);
 
@@ -74,7 +95,6 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
       child.stderr.on('data', (d) => { stderrData += d.toString(); });
 
       child.on('close', async (code) => {
-        // CLEANUP FILE
         try { await fs.unlink(fileName); } catch {}
 
         if (code !== 0 && stderrData.length > 0) {
