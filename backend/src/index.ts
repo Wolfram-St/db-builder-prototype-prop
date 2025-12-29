@@ -4,11 +4,9 @@ import cors from '@fastify/cors';
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
-import { pathToFileURL } from 'url';
 
 const server = Fastify({ logger: true });
 
-// --- TYPES ---
 interface DeployBody {
   desiredSql: string;
   targetDbUrl: string;
@@ -24,40 +22,48 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
   const { desiredSql, targetDbUrl } = request.body;
   const shadowDbUrl = process.env.SHADOW_DB_URL;
 
-  if (!desiredSql || !targetDbUrl) {
-    return reply.status(400).send({ error: "Missing SQL or Target DB URL" });
-  }
-  if (!shadowDbUrl) {
-    return reply.status(500).send({ error: "Server misconfigured: SHADOW_DB_URL missing" });
-  }
+  if (!desiredSql || !targetDbUrl) return reply.status(400).send({ error: "Missing Input" });
+  if (!shadowDbUrl) return reply.status(500).send({ error: "Missing Shadow DB URL" });
 
-  // 1. WRITE FILE LOCALLY
-  // We use a simple relative name. Node writes this to your 'backend' folder.
-  const fileName = `temp_${Date.now()}.sql`;
+  // 1. GENERATE FILE NAME
+  const fileName = `schema_${Date.now()}.sql`;
   
   try {
+    // Write file to current folder (Works on Windows & Render)
     await fs.writeFile(fileName, desiredSql);
 
-    // 2. CONVERT TO URL (THE FIX)
-    // We resolve the full path (G:\Code\...) and convert it to a URL (file:///G:/Code/...)
-    // This format works perfectly on Windows with Atlas.
-    const fullPath = path.resolve(fileName);
-    const fileUrl = pathToFileURL(fullPath).toString();
+    // 2. BUILD THE SAFE URL (The Magic Part)
+    // We get the current full folder path
+    let cwd = process.cwd();
+    
+    // IF WINDOWS: Replace backslashes (\) with forward slashes (/) 
+    // G:\Code\Project -> G:/Code/Project
+    if (process.platform === 'win32') {
+      cwd = cwd.replace(/\\/g, '/');
+    }
 
-    console.log("Plan Target:", fileUrl); // Debug log
+    // Construct the URL. 
+    // On Windows: file://G:/Code/Project/schema.sql
+    // On Render:  file:///app/backend/schema.sql
+    const safeUrl = `file://${cwd}/${fileName}`;
+    
+    console.log("Environment:", process.platform);
+    console.log("Target URL:", safeUrl);
 
-    // 3. RUN ATLAS (Spawn)
+    // 3. DEFINE COMMAND
     const args = [
       'schema', 'diff',
       '--from', targetDbUrl,
-      '--to', fileUrl,        // Passing the safe file URL
+      '--to', safeUrl,
       '--dev-url', shadowDbUrl,
       '--format', 'sql'
     ];
 
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows ? 'atlas.exe' : 'atlas';
+    // On Render/Linux, the command is just 'atlas'
+    // On Windows, we look for 'atlas.exe' or 'atlas'
+    const cmd = process.platform === 'win32' ? 'atlas.exe' : 'atlas';
 
+    // 4. SPAWN PROCESS
     return new Promise((resolve) => {
       const child = spawn(cmd, args);
 
@@ -68,16 +74,12 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
       child.stderr.on('data', (d) => { stderrData += d.toString(); });
 
       child.on('close', async (code) => {
-        // ALWAYS CLEANUP
+        // CLEANUP FILE
         try { await fs.unlink(fileName); } catch {}
 
         if (code !== 0 && stderrData.length > 0) {
-          console.error("Atlas Failed:", stderrData);
-          resolve(reply.status(500).send({ 
-            success: false, 
-            error: "Migration calculation failed",
-            details: stderrData 
-          }));
+          console.error("Atlas Error:", stderrData);
+          resolve(reply.status(500).send({ success: false, error: "Migration failed", details: stderrData }));
         } else {
           resolve({ success: true, plan: stdoutData });
         }
@@ -85,15 +87,9 @@ server.post<{ Body: DeployBody }>('/deploy/plan', async (request, reply) => {
     });
 
   } catch (error: any) {
-    // Cleanup if crash
     try { await fs.unlink(fileName).catch(() => {}); } catch {}
-    
     server.log.error(error);
-    return reply.status(500).send({ 
-      success: false, 
-      error: "Internal Server Error", 
-      details: error.message 
-    });
+    return reply.status(500).send({ success: false, error: "Server Error", details: error.message });
   }
 });
 

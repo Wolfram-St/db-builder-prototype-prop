@@ -1,26 +1,27 @@
-# 1. Use Node Alpine (Lightweight Linux)
-FROM node:18-alpine
+# 1. Use standard Node image (Debian based)
+FROM node:18
 
-# 2. Install Curl (Required to download Atlas)
-RUN apk --no-cache add curl
+# 2. Install Curl for downloading Atlas
+RUN apt-get update && apt-get install -y curl
 
-# 3. Install Atlas (The official script)
+# 3. Install Atlas to a global location
 RUN curl -sSf https://atlasgo.sh | sh
 
-# 4. Set Working Directory
+# 4. Set the working directory
 WORKDIR /app
 
-# 5. Copy Package Files First (Better Caching)
+# 5. Copy package files and install dependencies
 COPY package.json package-lock.json ./
-
-# 6. Install Dependencies (Including devDependencies for TypeScript)
 RUN npm install
 
-# 7. Copy Source Code
+# 6. Copy the rest of the code
 COPY . .
 
-# 8. Build TypeScript
+# 7. Build the TypeScript code
 RUN npm run build
 
-# 9. Start the Server (Run the compiled JS)
+# 8. EXPOSE the port (Hints Render to open port 3000)
+EXPOSE 3000
+
+# 9. Start the server
 CMD ["node", "dist/index.js"]
