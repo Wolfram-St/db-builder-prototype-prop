@@ -1,5 +1,5 @@
 import knex from 'knex';
-import type { DBTable, Relation } from '../types/schema';
+import type { DBTable, Relation } from '../types/schema.js'; // Kept .js extension
 
 const pg = knex({
   client: 'pg',
@@ -25,7 +25,8 @@ export const generateSQL = (tables: DBTable[], relations: Relation[]): string =>
     seenNames.add(normalizedName);
 
     const query = pg.schema.createTable(table.name, (t) => {
-      table.columns.forEach(col => {
+      // FIX 1: Added ': any' to 'col' to stop the TS7006 error
+      table.columns.forEach((col: any) => {
         const type = col.type.toLowerCase();
 
         if (col.isPrimary) {
@@ -70,7 +71,9 @@ export const generateSQL = (tables: DBTable[], relations: Relation[]): string =>
     if (!childTable || !parentTable) return;
 
     const expectedName = `${parentTable.name.toLowerCase()}_id`;
-    const fkCol = childTable.columns.find(c => 
+    
+    // FIX 2: Added ': any' to 'c' to stop the TS7006 error
+    const fkCol = childTable.columns.find((c: any) => 
       (c.references && c.references.tableId === parentTable.id) || 
       c.name.toLowerCase() === expectedName
     );

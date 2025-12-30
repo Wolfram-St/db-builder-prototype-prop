@@ -4,8 +4,8 @@ import cors from '@fastify/cors';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import fs from 'fs/promises';
 
-import { generateSQL } from './lib/sqlGenerator';
-import type { DBTable, Relation } from './types/schema';
+import { generateSQL } from './lib/sqlGenerator.js';
+import type { DBTable, Relation } from './types/schema.js';
 
 const server = Fastify({ logger: true });
 

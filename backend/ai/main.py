@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     HF_ACCESS_TOKEN: str
-    CORS_ORIGINS: List[str] = ["https://db-builder-production-level-mejcqmysi-khengars-projects.vercel.app/"]
+    CORS_ORIGINS: List[str] = ["https://db-builder-production-level.vercel.app"]
     
     # We use the OpenAI-compatible endpoint from Hugging Face
     HF_BASE_URL: str = "https://api-inference.huggingface.co/v1/"
