@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # AI Agent Service
+  ai-agent:
+    build:
+      context: ./ai-agent-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - MODEL_NAME=llama3.2
+      - PORT=3001
+    depends_on:
+      - ollama
+    networks:
+      - db-builder-network
+    restart: unless-stopped
+
+  # Ollama Service (LLM Backend)
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - db-builder-network
+    restart: unless-stopped
+    # For GPU support (RTX 3050)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Main DB Builder Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - SHADOW_DB_URL=${SHADOW_DB_URL}
+    networks:
+      - db-builder-network
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+
+networks:
+  db-builder-network:
+    driver: bridge

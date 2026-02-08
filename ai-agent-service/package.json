@@ -1,6 +1,7 @@
 {
-  "name": "db-builder-backend",
+  "name": "ai-agent-service",
   "version": "1.0.0",
+  "description": "AI Agent microservice for DB Builder with Ollama integration",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -10,14 +11,14 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
-    "@huggingface/inference": "^4.13.5",
     "dotenv": "^16.6.1",
     "fastify": "^5.7.2",
-    "knex": "^3.1.0",
-    "pg": "^8.16.3"
+    "ollama": "^0.5.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.8.10",
+    "@types/uuid": "^9.0.7",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2"
   }
