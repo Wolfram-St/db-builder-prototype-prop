@@ -19,7 +19,8 @@ import {
   Wand2,
   Cloud,
   Loader2,
-  CloudUpload
+  CloudUpload,
+  Bot
 } from "lucide-react";
 
 // Components
@@ -33,6 +34,7 @@ import SnipOverlay from "./SnipOverlay";
 import GenerateModal from "./GenerateModel";
 import { NotFound } from "./NotFound"; // Import your 404 component
 import { DeployModal } from "./DeployModel"; // Add this
+import { AIAgentPanel } from "./AIAgentPanel"; // AI Agent Panel
 
 // Store & Libs
 import { useDBStore } from "../store/dbStore";
@@ -67,6 +69,7 @@ function WorkStation() {
   // --- LOCAL STATE ---
   const [snipOpen, setSnipOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [aiAgentOpen, setAiAgentOpen] = useState(false); // AI Agent Panel state
   const mainRef = useRef<HTMLDivElement | null>(null);
 
   // --- CLOUD & SECURITY STATE ---
@@ -255,9 +258,10 @@ function WorkStation() {
           return;
         }
 
-        // 4. Close any open UI panels (like Generate Modal)
-        if (generateOpen) setGenerateOpen(false);
-        if (snipOpen) setSnipOpen(false);
+        // 4. Close any open UI panels
+        if (aiAgentOpen) setAiAgentOpen(false);
+        else if (generateOpen) setGenerateOpen(false);
+        else if (snipOpen) setSnipOpen(false);
       }
 
       // --- EXISTING SHORTCUTS ---
@@ -283,7 +287,7 @@ function WorkStation() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deleteSelected, undo, redo, generateOpen, snipOpen]);
+  }, [deleteSelected, undo, redo, generateOpen, snipOpen, aiAgentOpen]);
 
   /* -------------------------------------------------------
       PAN & ZOOM
@@ -509,6 +513,15 @@ function WorkStation() {
       {!snipOpen && (
         <div className="absolute bottom-8 right-8 z-40 flex flex-col items-end gap-4 pointer-events-none">
 
+          {/* AI AGENT BUTTON */}
+          <button
+            onClick={() => setAiAgentOpen(true)}
+            className="pointer-events-auto flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-full shadow-lg shadow-blue-900/50 transition-all active:scale-95 group"
+          >
+            <Bot className="w-4 h-4" />
+            <span className="text-sm font-medium">AI Assistant</span>
+          </button>
+
           {/* GENERATE BUTTON */}
           <button
             onClick={() => setGenerateOpen(true)}
@@ -578,6 +591,10 @@ function WorkStation() {
     </Suspense>
     
       {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} />}
+      
+      {/* AI Agent Panel */}
+      <AIAgentPanel isOpen={aiAgentOpen} onClose={() => setAiAgentOpen(false)} />
+      
       <Toaster position="top-center" theme="dark" richColors />
 
     </div>
